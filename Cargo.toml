@@ -1,3 +1,7 @@
+[workspace]
+members = ["bindings/praeda-godot"]
+default-members = [".", "bindings/praeda-godot"]
+
 [package]
 name = "praeda"
 version = "0.1.0"
@@ -11,6 +15,7 @@ homepage = "https://github.com/EddieDover/praeda"
 readme = "README.md"
 keywords = ["loot", "procedural", "generation", "game", "items"]
 categories = ["game-development", "no-std"]
+exclude = ["bindings", "examples", "scripts"]
 
 [lib]
 crate-type = ["rlib", "cdylib"]
