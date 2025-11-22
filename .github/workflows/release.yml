@@ -33,21 +33,21 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             godot_artifact: libpraeda_godot.so
-            godot_asset: praeda-godot-linux-x86_64.so
+            godot_asset: libpraeda_godot.so
             core_artifact: libpraeda.so
             cpp_asset: praeda-cpp-linux-x86_64.zip
             csharp_asset: praeda-csharp-linux-x86_64.zip
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             godot_artifact: praeda_godot.dll
-            godot_asset: praeda-godot-windows-x86_64.dll
+            godot_asset: praeda_godot.dll
             core_artifact: praeda.dll
             cpp_asset: praeda-cpp-windows-x86_64.zip
             csharp_asset: praeda-csharp-windows-x86_64.zip
           - os: macos-latest
             target: aarch64-apple-darwin
             godot_artifact: libpraeda_godot.dylib
-            godot_asset: praeda-godot-macos-arm64.dylib
+            godot_asset: libpraeda_godot.dylib
             core_artifact: libpraeda.dylib
             cpp_asset: praeda-cpp-macos-arm64.zip
             csharp_asset: praeda-csharp-macos-arm64.zip
@@ -99,13 +99,68 @@ jobs:
             zip -r ${{ matrix.csharp_asset }} csharp_dist
           fi
 
+      - name: Upload Godot Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-lib-${{ matrix.os }}
+          path: ${{ matrix.godot_asset }}
+
       - name: Upload Release Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           gh release upload ${{ github.ref_name }} \
-            ${{ matrix.godot_asset }} \
             ${{ matrix.cpp_asset }} \
             ${{ matrix.csharp_asset }} \
             --clobber
+
+  package-godot:
+    name: Package Godot Addon
+    needs: [create-release, build-release-assets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux Lib
+        uses: actions/download-artifact@v4
+        with:
+          name: godot-lib-ubuntu-latest
+          path: godot_dist/libs
+
+      - name: Download Windows Lib
+        uses: actions/download-artifact@v4
+        with:
+          name: godot-lib-windows-latest
+          path: godot_dist/libs
+
+      - name: Download MacOS Lib
+        uses: actions/download-artifact@v4
+        with:
+          name: godot-lib-macos-latest
+          path: godot_dist/libs
+
+      - name: Create gdextension file
+        run: |
+          cat <<EOF > godot_dist/praeda.gdextension
+          [configuration]
+          entry_symbol = "gdext_rust_init"
+          compatibility_minimum = "4.2"
+
+          [libraries]
+          linux.debug.x86_64 = "res://libs/libpraeda_godot.so"
+          linux.release.x86_64 = "res://libs/libpraeda_godot.so"
+          windows.debug.x86_64 = "res://libs/praeda_godot.dll"
+          windows.release.x86_64 = "res://libs/praeda_godot.dll"
+          macos.debug = "res://libs/libpraeda_godot.dylib"
+          macos.release = "res://libs/libpraeda_godot.dylib"
+          EOF
+
+      - name: Zip Godot Addon
+        run: |
+          cd godot_dist
+          zip -r ../praeda-godot-addon.zip .
+
+      - name: Upload Godot Addon
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} praeda-godot-addon.zip --clobber
