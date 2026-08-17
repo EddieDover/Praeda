@@ -1,6 +1,7 @@
 use crate::error::{PraedaError, Result};
 use crate::models::*;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use std::collections::HashMap;
 use std::fs;
 
@@ -22,6 +23,8 @@ use std::fs;
 ///
 /// - [`generate_loot`](Self::generate_loot) - Generate items and return as `Vec<Item>`
 /// - [`generate_loot_json`](Self::generate_loot_json) - Generate items and return as JSON string
+/// - [`generate_loot_seeded`](Self::generate_loot_seeded) - Generate items reproducibly from a seed
+/// - [`generate_loot_seeded_json`](Self::generate_loot_seeded_json) - Seeded generation as JSON string
 ///
 /// # Example
 ///
@@ -661,16 +664,86 @@ impl PraedaGenerator {
         overrides: &GeneratorOverrides,
         key: &str,
     ) -> Result<Vec<Item>> {
+        let mut rng = rand::rng();
+        self.generate_loot_with(options, overrides, key, &mut rng)
+    }
+
+    /// Generates a collection of items reproducibly from an explicit seed.
+    ///
+    /// Identical to [`generate_loot`](Self::generate_loot) except that all randomness is drawn
+    /// from a ChaCha8 stream seeded with `seed`. For a fixed generator configuration, fixed
+    /// `options` and fixed `overrides`, the same seed always yields an identical `Vec<Item>`,
+    /// in any process and across rebuilds.
+    ///
+    /// ChaCha8 is used rather than `StdRng` because its output is specified to be stable across
+    /// `rand` releases and platforms, which `StdRng` explicitly does not promise.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - [`GeneratorOptions`] controlling generation parameters
+    /// * `overrides` - [`GeneratorOverrides`] for optional per-generation customization
+    /// * `key` - A string key to identify and later retrieve these items
+    /// * `seed` - Seed for the generation stream
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<Item>` with the generated items.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error under the same conditions as [`generate_loot`](Self::generate_loot).
+    ///
+    /// # Portability
+    ///
+    /// Item selection and every integer draw are reproducible on all platforms. Attribute values
+    /// generated with `linear: false` use floating point exponentiation, whose final bit may
+    /// differ between platform math libraries; those values are reproducible on a given platform
+    /// but are not guaranteed bit-identical across platforms. Configurations using `linear: true`
+    /// are bit-identical everywhere.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let first = generator.generate_loot_seeded(&options, &Default::default(), "delve", 42)?;
+    /// let second = generator.generate_loot_seeded(&options, &Default::default(), "delve", 42)?;
+    /// assert_eq!(first, second);
+    /// ```
+    pub fn generate_loot_seeded(
+        &mut self,
+        options: &GeneratorOptions,
+        overrides: &GeneratorOverrides,
+        key: &str,
+        seed: u64,
+    ) -> Result<Vec<Item>> {
+        let mut rng = Self::seeded_rng(seed);
+        self.generate_loot_with(options, overrides, key, &mut rng)
+    }
+
+    fn generate_loot_with(
+        &mut self,
+        options: &GeneratorOptions,
+        overrides: &GeneratorOverrides,
+        key: &str,
+        rng: &mut impl Rng,
+    ) -> Result<Vec<Item>> {
         let mut items = Vec::new();
         for _ in 0..options.number_of_items {
-            let item = self.generate_item(options, overrides)?;
+            let item = self.generate_item(options, overrides, rng)?;
             items.push(item);
         }
         self.loot_list.insert(key.to_string(), items.clone());
         Ok(items)
     }
 
+    fn seeded_rng(seed: u64) -> ChaCha8Rng {
+        let mut seed_bytes = [0u8; 32];
+        seed_bytes[..8].copy_from_slice(&seed.to_le_bytes());
+        ChaCha8Rng::from_seed(seed_bytes)
+    }
+
     /// Generate loot and return as JSON string
+    ///
+    /// Object keys are emitted in sorted order, so the JSON for a given set of items is stable.
     pub fn generate_loot_json(
         &mut self,
         options: &GeneratorOptions,
@@ -678,6 +751,21 @@ impl PraedaGenerator {
         key: &str,
     ) -> Result<String> {
         let items = self.generate_loot(options, overrides, key)?;
+        Ok(serde_json::to_string(&items)?)
+    }
+
+    /// Generate loot reproducibly from an explicit seed and return as JSON string
+    ///
+    /// See [`generate_loot_seeded`](Self::generate_loot_seeded) for the determinism guarantee.
+    /// Object keys are emitted in sorted order, so the same seed produces the same JSON text.
+    pub fn generate_loot_seeded_json(
+        &mut self,
+        options: &GeneratorOptions,
+        overrides: &GeneratorOverrides,
+        key: &str,
+        seed: u64,
+    ) -> Result<String> {
+        let items = self.generate_loot_seeded(options, overrides, key, seed)?;
         Ok(serde_json::to_string(&items)?)
     }
 
@@ -699,14 +787,13 @@ impl PraedaGenerator {
         &self,
         options: &GeneratorOptions,
         overrides: &GeneratorOverrides,
+        rng: &mut impl Rng,
     ) -> Result<Item> {
-        let mut rng = rand::rng();
-
         // Select quality
         let item_quality = if !overrides.quality_override.is_empty() {
             overrides.quality_override.clone()
         } else {
-            self.weighted_random_select(&self.quality_data, &mut rng)?
+            self.weighted_random_select(&self.quality_data, rng)?
         };
 
         // Select item type
@@ -719,7 +806,7 @@ impl PraedaGenerator {
                 .iter()
                 .map(|it| (it.item_type.clone(), it.weight))
                 .collect();
-            self.weighted_random_select(&weights, &mut rng)?
+            self.weighted_random_select(&weights, rng)?
             // LCOV_EXCL_END
         };
 
@@ -729,7 +816,7 @@ impl PraedaGenerator {
         } else {
             // LCOV_EXCL_START - Rare path: no subtype override, using weighted selection
             if let Some(item_type_obj) = self.get_item_type(&item_type) {
-                self.weighted_random_select(item_type_obj.get_subtypes(), &mut rng)?
+                self.weighted_random_select(item_type_obj.get_subtypes(), rng)?
             } else {
                 String::new()
             }
@@ -795,7 +882,7 @@ impl PraedaGenerator {
             HashMap::new(),
         );
 
-        self.calculate_attributes(&mut item, options, &mut rng)?;
+        self.calculate_attributes(&mut item, options, rng)?;
 
         // Attach subtype metadata to the item
         if let Some(metadata) = self.get_all_subtype_metadata(&item_type, &subtype) {
@@ -818,7 +905,7 @@ impl PraedaGenerator {
         &self,
         item: &mut Item,
         options: &GeneratorOptions,
-        rng: &mut rand::rngs::ThreadRng,
+        rng: &mut impl Rng,
     ) -> Result<()> {
         // Generate item level
         let level_range = options.level_variance;
@@ -949,7 +1036,7 @@ impl PraedaGenerator {
     fn weighted_random_select(
         &self,
         weights: &HashMap<String, i32>,
-        rng: &mut rand::rngs::ThreadRng,
+        rng: &mut impl Rng,
     ) -> Result<String> {
         if weights.is_empty() {
             return Err(PraedaError::InvalidData("No items to select from".to_string()));

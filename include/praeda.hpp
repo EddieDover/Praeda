@@ -139,6 +139,19 @@ extern "C" {
         char** error_out
     );
 
+    // The same seed, configuration, and options always produce identical items.
+    CItemArrayHandle* praeda_generator_generate_loot_seeded(
+        PraedaGeneratorHandle* handle,
+        uint32_t number_of_items,
+        double base_level,
+        double level_variance,
+        double affix_chance,
+        uint8_t linear,
+        double scaling_factor,
+        uint64_t seed,
+        char** error_out
+    );
+
     // Item array access
     uint32_t praeda_item_array_count(const CItemArrayHandle* handle);
     const CItem* praeda_item_array_get(const CItemArrayHandle* handle, uint32_t index);
@@ -462,26 +475,26 @@ public:
             &error
         );
 
-        if (!array_handle) {
-            if (error) {
-                CStringWrapper error_wrapper(error);
-                throw Exception(error_wrapper.str());
-            }
-            throw Exception("Failed to generate loot");
-        }
+        return collect_loot(array_handle, error);
+    }
 
-        std::vector<Item> items;
-        uint32_t count = praeda_item_array_count(array_handle);
+    /// Generate loot items deterministically from an explicit seed.
+    /// Returns a vector of native Item objects.
+    std::vector<Item> generate_loot_seeded(const GenerationOptions& options, uint64_t seed) {
+        char* error = nullptr;
+        CItemArrayHandle* array_handle = praeda_generator_generate_loot_seeded(
+            handle_,
+            options.number_of_items,
+            options.base_level,
+            options.level_variance,
+            options.affix_chance,
+            options.linear ? 1 : 0,
+            options.scaling_factor,
+            seed,
+            &error
+        );
 
-        for (uint32_t i = 0; i < count; ++i) {
-            const CItem* c_item = praeda_item_array_get(array_handle, i);
-            if (c_item) {
-                items.push_back(Item::from_c(*c_item));
-            }
-        }
-
-        praeda_item_array_free(array_handle);
-        return items;
+        return collect_loot(array_handle, error);
     }
 
     /// Check if a quality exists
@@ -507,6 +520,29 @@ private:
     PraedaGeneratorHandle* handle_;
 
     explicit Generator(PraedaGeneratorHandle* handle) : handle_(handle) {}
+
+    static std::vector<Item> collect_loot(CItemArrayHandle* array_handle, char* error) {
+        if (!array_handle) {
+            if (error) {
+                CStringWrapper error_wrapper(error);
+                throw Exception(error_wrapper.str());
+            }
+            throw Exception("Failed to generate loot");
+        }
+
+        std::vector<Item> items;
+        uint32_t count = praeda_item_array_count(array_handle);
+
+        for (uint32_t i = 0; i < count; ++i) {
+            const CItem* c_item = praeda_item_array_get(array_handle, i);
+            if (c_item) {
+                items.push_back(Item::from_c(*c_item));
+            }
+        }
+
+        praeda_item_array_free(array_handle);
+        return items;
+    }
 
     PraedaGeneratorHandle* release() {
         PraedaGeneratorHandle* temp = handle_;

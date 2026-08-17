@@ -9,7 +9,38 @@ A procedural loot generator library written in Rust with FFI bindings (and examp
 - Attribute scaling based on item level
 - Named item generation with customizable prefixes and suffixes
 - Affix system for dynamic item modifiers
+- Deterministic, seeded generation for reproducible simulations and saves
 - Foreign Function Interface (FFI) bindings for C++ and C#
+
+## Deterministic Generation
+
+`generate_loot` draws from a thread-local, entropy-seeded generator, so its output cannot be
+reproduced. When you need reproducibility, pass an explicit seed instead:
+
+```rust
+let first = generator.generate_loot_seeded(&options, &GeneratorOverrides::empty(), "delve", 42)?;
+let second = generator.generate_loot_seeded(&options, &GeneratorOverrides::empty(), "delve", 42)?;
+
+assert_eq!(first, second);
+```
+
+For a fixed generator configuration, fixed options and fixed overrides, the same seed produces an
+identical `Vec<Item>` in every process and across rebuilds. Generation uses ChaCha8, whose output
+is stable across releases of the `rand` crate and across platforms, rather than a platform default
+generator that offers no such promise.
+
+Praeda keeps no random state between calls, so seeded and unseeded calls can be interleaved
+without affecting each other. Callers driving a deterministic simulation typically derive one seed
+per call from their own seeded stream.
+
+Attributes generated with `linear: false` use floating point exponentiation, whose final bit may
+differ between platform math libraries; those values are reproducible on a given platform but are
+not guaranteed bit-identical across platforms. Configurations using `linear: true` are
+bit-identical everywhere.
+
+`generate_loot_seeded_json` is the JSON equivalent, and the same guarantee applies to its text:
+object keys are emitted in sorted order, so identical items always serialize identically. The FFI
+entry point is documented in [FFI.md](FFI.md#deterministic-generation).
 
 ## Quick Start
 

@@ -163,6 +163,19 @@ namespace Praeda {
         );
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr praeda_generator_generate_loot_seeded(
+            IntPtr handle,
+            uint numberOfItems,
+            double baseLevel,
+            double levelVariance,
+            double affixChance,
+            byte linear,
+            double scalingFactor,
+            ulong seed,
+            out IntPtr errorOut
+        );
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern uint praeda_item_array_count(IntPtr handle);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -451,6 +464,34 @@ namespace Praeda {
                 out errorPtr
             );
 
+            return CollectLoot(arrayHandle, errorPtr);
+        }
+
+        /// <summary>
+        /// Generate loot items deterministically from an explicit seed.
+        /// The same seed, generator configuration and options always produce identical items,
+        /// in every process and across rebuilds.
+        /// </summary>
+        public List<Item> GenerateLootSeeded(GenerationOptions options, ulong seed) {
+            ThrowIfDisposed();
+
+            IntPtr errorPtr = IntPtr.Zero;
+            IntPtr arrayHandle = NativeMethods.praeda_generator_generate_loot_seeded(
+                handle,
+                options.NumberOfItems,
+                options.BaseLevel,
+                options.LevelVariance,
+                options.AffixChance,
+                (byte)(options.Linear ? 1 : 0),
+                options.ScalingFactor,
+                seed,
+                out errorPtr
+            );
+
+            return CollectLoot(arrayHandle, errorPtr);
+        }
+
+        private static List<Item> CollectLoot(IntPtr arrayHandle, IntPtr errorPtr) {
             if (arrayHandle == IntPtr.Zero) {
                 string errorMsg = MarshalString(errorPtr);
                 throw new InvalidOperationException($"Failed to generate loot: {errorMsg}");

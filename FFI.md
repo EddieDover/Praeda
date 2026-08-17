@@ -216,6 +216,19 @@ Generate loot items.
 - Returns: `std::vector<Item>` of generated items
 - Throws: `praeda::Exception` on error
 
+#### `gen->generate_loot_seeded(const GenerationOptions& options, uint64_t seed)`
+Generate loot items deterministically from an explicit seed.
+- Parameters: Generation options struct, `uint64_t` seed
+- Returns: `std::vector<Item>` of generated items
+- Throws: `praeda::Exception` on error
+- See [Deterministic Generation](#deterministic-generation)
+
+```cpp
+auto first = gen->generate_loot_seeded(options, 42);
+auto second = gen->generate_loot_seeded(options, 42);
+// first and second contain the same items, in the same order
+```
+
 #### `gen->has_quality(const std::string&)`
 Check if a quality exists.
 - Returns: `bool`
@@ -389,6 +402,19 @@ Generate loot items.
 - Returns: `List<Item>` of generated items
 - Throws: `InvalidOperationException` on error
 
+#### `gen.GenerateLootSeeded(GenerationOptions options, ulong seed)`
+Generate loot items deterministically from an explicit seed.
+- Parameters: Generation options struct, `ulong` seed
+- Returns: `List<Item>` of generated items
+- Throws: `InvalidOperationException` on error
+- See [Deterministic Generation](#deterministic-generation)
+
+```csharp
+var first = gen.GenerateLootSeeded(options, 42UL);
+var second = gen.GenerateLootSeeded(options, 42UL);
+// first and second contain the same items, in the same order
+```
+
 #### `gen.HasQuality(string quality)`
 Check if a quality exists.
 - Returns: `bool`
@@ -434,6 +460,63 @@ var options = new GenerationOptions {
 - **AffixChance** (float): Probability of affixes 0.0-1.0 (default: 0.75)
 - **Linear** (bool): Use linear scaling if true, exponential if false (default: true)
 - **ScalingFactor** (float): Attribute scaling multiplier (default: 1.0)
+
+## Deterministic Generation
+
+The default entry point draws randomness from a thread-local, entropy-seeded generator, so its
+output cannot be reproduced. The seeded entry point takes an explicit `uint64_t` and draws from a
+ChaCha8 stream instead.
+
+**Guarantee:** for a fixed generator configuration and fixed options, the same seed produces an
+identical sequence of items, in every process, and across rebuilds of the library. ChaCha8 is used
+rather than a platform default generator because its output is specified to be stable across
+releases of the underlying `rand` crate and across platforms.
+
+Item selection, item order, and attribute ordering within each item are reproducible on all
+platforms. One caveat applies to values: attributes generated with `linear = false` use floating
+point exponentiation, whose final bit may differ between platform math libraries. Those values are
+reproducible on a given platform but are not guaranteed bit-identical across platforms.
+Configurations using `linear = true` are bit-identical everywhere.
+
+### C signature
+
+```c
+CItemArrayHandle* praeda_generator_generate_loot_seeded(
+    PraedaGeneratorHandle* handle,
+    uint32_t number_of_items,
+    double base_level,
+    double level_variance,
+    double affix_chance,
+    uint8_t linear,
+    double scaling_factor,
+    uint64_t seed,
+    char** error_out
+);
+```
+
+The unseeded `praeda_generator_generate_loot` is unchanged and remains available.
+
+### C++
+
+```cpp
+std::vector<Item> generate_loot_seeded(const GenerationOptions& options, uint64_t seed);
+```
+
+`uint64_t` requires no special handling.
+
+### C#
+
+```csharp
+public List<Item> GenerateLootSeeded(GenerationOptions options, ulong seed);
+```
+
+`ulong` (`System.UInt64`) marshals to `uint64_t` directly, with no marshalling attributes needed.
+
+### Usage
+
+Callers driving a deterministic simulation should derive one seed per call from their own seeded
+stream and pass it in. The library holds no cross-call random state, so seeded and unseeded calls
+can be interleaved freely without affecting each other.
 
 ## Configuration Format
 

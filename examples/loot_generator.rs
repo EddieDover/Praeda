@@ -1,6 +1,8 @@
 use praeda::*;
 use clap::Parser;
+use std::collections::BTreeMap;
 use std::fs;
+use rand::prelude::IndexedRandom;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Generate random loot items using Praeda", long_about = None)]
@@ -208,6 +210,18 @@ fn main() -> Result<()> {
 
     let items = generator.generate_loot(&options, &GeneratorOverrides::empty(), "cli")?;
 
+    // Print each generated item
+    // for (i, item) in items.iter().enumerate() {
+    //     print_item(i + 1, item);
+    // }
+
+    // Select a random item to display
+    if let Some(random_item) = items.choose(&mut rand::rng()) {
+        print_item(1, random_item);
+    }
+
+    print_summary(&items);
+
     // Save output to JSON
     eprintln!("Saving {} items to {}...", items.len(), args.output);
     let output_json = serde_json::to_string_pretty(&items)?;
@@ -216,4 +230,117 @@ fn main() -> Result<()> {
 
     println!("✅ Successfully generated {} items and saved to {}", items.len(), args.output);
     Ok(())
+}
+
+/// Builds the full display name of an item, including any prefix and suffix.
+fn display_name(item: &Item) -> String {
+    let mut parts = Vec::new();
+    if !item.prefix.name.is_empty() {
+        parts.push(item.prefix.name.clone());
+    }
+    parts.push(item.name.clone());
+    if !item.suffix.name.is_empty() {
+        parts.push(item.suffix.name.clone());
+    }
+    parts.join(" ")
+}
+
+/// Prints a detailed card for a single generated item.
+fn print_item(index: usize, item: &Item) {
+    let level = item
+        .get_attribute("level")
+        .map(|a| a.initial_value)
+        .unwrap_or(0.0);
+
+    println!();
+    println!("─── Item #{} ───────────────────────────────", index);
+    println!("  {}", display_name(item));
+    println!("  {} {} ({}), level {:.0}", item.quality, item.item_type, item.subtype, level);
+
+    // Sort attributes for stable, readable output; level is shown above
+    let attrs: BTreeMap<_, _> = item
+        .attributes
+        .iter()
+        .filter(|(name, _)| name.as_str() != "level")
+        .collect();
+
+    if !attrs.is_empty() {
+        println!("  Attributes:");
+        for (name, attr) in &attrs {
+            println!("    {:<26} {:>8.1}", name, attr.initial_value);
+        }
+    }
+
+    for (label, affix) in [("Prefix", &item.prefix), ("Suffix", &item.suffix)] {
+        if !affix.name.is_empty() {
+            let bonuses: Vec<String> = affix
+                .attributes
+                .iter()
+                .map(|a| format!("{} {:+.0}", a.name, a.initial_value))
+                .collect();
+            println!("  {}: \"{}\" ({})", label, affix.name, bonuses.join(", "));
+        }
+    }
+}
+
+/// Prints aggregate statistics about the generated loot.
+fn print_summary(items: &[Item]) {
+    if items.is_empty() {
+        return;
+    }
+
+    let mut quality_counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut type_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut affixed = 0usize;
+    let mut min_level = f64::MAX;
+    let mut max_level = f64::MIN;
+    let mut level_sum = 0.0;
+
+    for item in items {
+        *quality_counts.entry(item.quality.as_str()).or_default() += 1;
+        *type_counts
+            .entry(format!("{}/{}", item.item_type, item.subtype))
+            .or_default() += 1;
+        if !item.prefix.name.is_empty() || !item.suffix.name.is_empty() {
+            affixed += 1;
+        }
+        let level = item
+            .get_attribute("level")
+            .map(|a| a.initial_value)
+            .unwrap_or(0.0);
+        min_level = min_level.min(level);
+        max_level = max_level.max(level);
+        level_sum += level;
+    }
+
+    let total = items.len();
+
+    println!();
+    println!("═══ Summary ════════════════════════════════");
+    println!("  Items generated: {}", total);
+    println!(
+        "  Item levels: {:.0}–{:.0} (avg {:.1})",
+        min_level,
+        max_level,
+        level_sum / total as f64
+    );
+    println!(
+        "  With affixes: {} of {} ({:.0}%)",
+        affixed,
+        total,
+        affixed as f64 / total as f64 * 100.0
+    );
+
+    println!("  Quality distribution:");
+    for (quality, count) in &quality_counts {
+        let pct = *count as f64 / total as f64 * 100.0;
+        let bar = "█".repeat(((pct / 5.0).round() as usize).max(1));
+        println!("    {:<12} {:>4} ({:>5.1}%) {}", quality, count, pct, bar);
+    }
+
+    println!("  Type breakdown:");
+    for (type_key, count) in &type_counts {
+        println!("    {:<22} {:>4}", type_key, count);
+    }
+    println!();
 }
