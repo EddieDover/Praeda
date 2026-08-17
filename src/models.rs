@@ -1,6 +1,28 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Serializes a string-keyed map in sorted key order, so that two identical items always
+/// serialize to identical text. `HashMap` iteration order varies between processes.
+fn serialize_sorted_map<S, V>(
+    map: &HashMap<String, V>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+    V: Serialize,
+{
+    use serde::ser::SerializeMap;
+
+    let mut keys: Vec<&String> = map.keys().collect();
+    keys.sort();
+
+    let mut entries = serializer.serialize_map(Some(keys.len()))?;
+    for key in keys {
+        entries.serialize_entry(key, &map[key])?;
+    }
+    entries.end()
+}
+
 /// Represents an item type with subtypes and weight
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ItemType {
@@ -357,8 +379,9 @@ pub struct Item {
     pub subtype: String,
     pub prefix: Affix,
     pub suffix: Affix,
+    #[serde(serialize_with = "serialize_sorted_map")]
     pub attributes: HashMap<String, ItemAttribute>,
-    #[serde(default)]
+    #[serde(default, serialize_with = "serialize_sorted_map")]
     pub metadata: HashMap<String, serde_json::Value>,
 }
 

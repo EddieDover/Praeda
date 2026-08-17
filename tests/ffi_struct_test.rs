@@ -971,3 +971,232 @@ fn test_set_attribute_null_handle() {
         assert_eq!(result, -1, "Setting attribute on null handle should fail");
     }
 }
+
+#[test]
+fn ffi_seeded_matches_rust_seeded() {
+    use praeda::{GeneratorOptions, GeneratorOverrides, ItemAttribute, PraedaGenerator};
+
+    const SEED: u64 = 6180339887;
+
+    unsafe {
+        let handle = praeda_generator_new();
+        assert!(!handle.is_null());
+
+        let _ = praeda_generator_set_quality_data(handle, CString::new("common").unwrap().as_ptr(), 100);
+        let _ = praeda_generator_set_quality_data(handle, CString::new("rare").unwrap().as_ptr(), 30);
+
+        let _ = praeda_generator_set_item_type(handle, CString::new("weapon").unwrap().as_ptr(), 3);
+        let _ = praeda_generator_set_item_type(handle, CString::new("armor").unwrap().as_ptr(), 2);
+
+        let _ = praeda_generator_set_item_subtype(
+            handle,
+            CString::new("weapon").unwrap().as_ptr(),
+            CString::new("sword").unwrap().as_ptr(),
+            2,
+        );
+        let _ = praeda_generator_set_item_subtype(
+            handle,
+            CString::new("weapon").unwrap().as_ptr(),
+            CString::new("axe").unwrap().as_ptr(),
+            1,
+        );
+        let _ = praeda_generator_set_item_subtype(
+            handle,
+            CString::new("armor").unwrap().as_ptr(),
+            CString::new("head").unwrap().as_ptr(),
+            1,
+        );
+
+        let sword_names = vec![
+            CString::new("longsword").unwrap(),
+            CString::new("shortsword").unwrap(),
+            CString::new("rapier").unwrap(),
+        ];
+        let sword_ptrs: Vec<*const c_char> = sword_names.iter().map(|s| s.as_ptr()).collect();
+        let _ = praeda_generator_set_item_names(
+            handle,
+            CString::new("weapon").unwrap().as_ptr(),
+            CString::new("sword").unwrap().as_ptr(),
+            sword_ptrs.as_ptr(),
+            sword_ptrs.len() as u32,
+        );
+
+        let axe_names = vec![
+            CString::new("battleaxe").unwrap(),
+            CString::new("hatchet").unwrap(),
+        ];
+        let axe_ptrs: Vec<*const c_char> = axe_names.iter().map(|s| s.as_ptr()).collect();
+        let _ = praeda_generator_set_item_names(
+            handle,
+            CString::new("weapon").unwrap().as_ptr(),
+            CString::new("axe").unwrap().as_ptr(),
+            axe_ptrs.as_ptr(),
+            axe_ptrs.len() as u32,
+        );
+
+        let head_names = vec![CString::new("helm").unwrap(), CString::new("crown").unwrap()];
+        let head_ptrs: Vec<*const c_char> = head_names.iter().map(|s| s.as_ptr()).collect();
+        let _ = praeda_generator_set_item_names(
+            handle,
+            CString::new("armor").unwrap().as_ptr(),
+            CString::new("head").unwrap().as_ptr(),
+            head_ptrs.as_ptr(),
+            head_ptrs.len() as u32,
+        );
+
+        let _ = praeda_generator_set_attribute(
+            handle,
+            CString::new("weapon").unwrap().as_ptr(),
+            CString::new("").unwrap().as_ptr(),
+            CString::new("damage").unwrap().as_ptr(),
+            10.0,
+            1.0,
+            20.0,
+            1,
+        );
+        let _ = praeda_generator_set_attribute(
+            handle,
+            CString::new("weapon").unwrap().as_ptr(),
+            CString::new("").unwrap().as_ptr(),
+            CString::new("crit_chance").unwrap().as_ptr(),
+            0.5,
+            0.0,
+            5.0,
+            0,
+        );
+        let _ = praeda_generator_set_attribute(
+            handle,
+            CString::new("armor").unwrap().as_ptr(),
+            CString::new("").unwrap().as_ptr(),
+            CString::new("defense").unwrap().as_ptr(),
+            5.0,
+            1.0,
+            10.0,
+            1,
+        );
+
+        let mut error_ptr = std::ptr::null_mut();
+        let array_handle = praeda_generator_generate_loot_seeded(
+            handle,
+            6,
+            10.0,
+            5.0,
+            0.5,
+            1,
+            1.5,
+            SEED,
+            &mut error_ptr,
+        );
+
+        assert!(
+            !array_handle.is_null(),
+            "Seeded item array should not be null (error: {})",
+            c_str_to_string(error_ptr)
+        );
+        assert_eq!(praeda_item_array_count(array_handle), 6);
+
+        let mut rust_generator = PraedaGenerator::new();
+        rust_generator.set_quality_data("common", 100);
+        rust_generator.set_quality_data("rare", 30);
+        rust_generator.set_item_type("weapon", 3);
+        rust_generator.set_item_type("armor", 2);
+        rust_generator.set_item_subtype("weapon", "sword", 2);
+        rust_generator.set_item_subtype("weapon", "axe", 1);
+        rust_generator.set_item_subtype("armor", "head", 1);
+        rust_generator.set_item("weapon", "sword", vec!["longsword", "shortsword", "rapier"]);
+        rust_generator.set_item("weapon", "axe", vec!["battleaxe", "hatchet"]);
+        rust_generator.set_item("armor", "head", vec!["helm", "crown"]);
+        rust_generator.set_attribute(
+            "weapon",
+            "",
+            ItemAttribute::new("damage", 10.0, 1.0, 20.0, true),
+        );
+        rust_generator.set_attribute(
+            "weapon",
+            "",
+            ItemAttribute::new("crit_chance", 0.5, 0.0, 5.0, false),
+        );
+        rust_generator.set_attribute(
+            "armor",
+            "",
+            ItemAttribute::new("defense", 5.0, 1.0, 10.0, true),
+        );
+
+        let options = GeneratorOptions {
+            number_of_items: 6,
+            base_level: 10.0,
+            level_variance: 5.0,
+            affix_chance: 0.5,
+            linear: true,
+            scaling_factor: 1.5,
+        };
+
+        let rust_items = rust_generator
+            .generate_loot_seeded(&options, &GeneratorOverrides::empty(), "ffi", SEED)
+            .expect("Rust seeded generation should succeed");
+
+        for (index, rust_item) in rust_items.iter().enumerate() {
+            let item_ptr = praeda_item_array_get(array_handle, index as u32);
+            assert!(!item_ptr.is_null(), "Item {} should not be null", index);
+            let c_item = unsafe { &*item_ptr };
+
+            assert_eq!(
+                c_str_to_string(c_item.name),
+                rust_item.get_name(),
+                "Item {} name should match the Rust API",
+                index
+            );
+            assert_eq!(
+                c_str_to_string(c_item.quality),
+                rust_item.get_quality(),
+                "Item {} quality should match the Rust API",
+                index
+            );
+            assert_eq!(
+                c_str_to_string(c_item.item_type),
+                rust_item.get_type(),
+                "Item {} type should match the Rust API",
+                index
+            );
+            assert_eq!(
+                c_str_to_string(c_item.subtype),
+                rust_item.get_subtype(),
+                "Item {} subtype should match the Rust API",
+                index
+            );
+
+            let mut expected_attributes: Vec<(String, f64)> = rust_item
+                .get_attributes()
+                .iter()
+                .map(|(name, attr)| (name.clone(), attr.initial_value))
+                .collect();
+            expected_attributes.sort_by(|a, b| a.0.cmp(&b.0));
+
+            assert_eq!(
+                c_item.attributes_count as usize,
+                expected_attributes.len(),
+                "Item {} should expose the same attribute count",
+                index
+            );
+
+            for (offset, (name, value)) in expected_attributes.iter().enumerate() {
+                let c_attr = unsafe { &*c_item.attributes.add(offset) };
+                assert_eq!(
+                    c_str_to_string(c_attr.name),
+                    *name,
+                    "Item {} attribute {} should be in sorted order",
+                    index,
+                    offset
+                );
+                assert_eq!(
+                    c_attr.initial_value, *value,
+                    "Item {} attribute {} value should match exactly",
+                    index, name
+                );
+            }
+        }
+
+        praeda_item_array_free(array_handle);
+        praeda_generator_free(handle);
+    }
+}

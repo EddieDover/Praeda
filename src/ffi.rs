@@ -123,9 +123,11 @@ pub struct CItem {
 
 impl CItem {
     fn from_rust(item: &Item) -> Self {
-        let attributes: Vec<CItemAttribute> = item
-            .attributes
-            .values()
+        let mut sorted_attributes: Vec<&ItemAttribute> = item.attributes.values().collect();
+        sorted_attributes.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let attributes: Vec<CItemAttribute> = sorted_attributes
+            .into_iter()
             .map(CItemAttribute::from_rust)
             .collect();
         let attr_count = attributes.len() as c_uint;
@@ -688,6 +690,57 @@ pub extern "C" fn praeda_generator_generate_loot(
 
     let generator = unsafe { &mut (*handle).generator };
     match generator.generate_loot(&options, &GeneratorOverrides::empty(), "ffi") {
+        Ok(items) => {
+            let c_array = CItemArray::from_rust(&items);
+            Box::into_raw(Box::new(CItemArrayHandle { array: c_array }))
+        }
+        Err(e) => {
+            if !error_out.is_null()
+                && let Ok(err) = CString::new(format!("Failed to generate loot: {}", e)) {
+                unsafe {
+                    *error_out = err.into_raw();
+                }
+            }
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Generate loot items deterministically from an explicit seed
+/// Returns handle to CItemArray on success, null on failure
+#[unsafe(no_mangle)]
+pub extern "C" fn praeda_generator_generate_loot_seeded(
+    handle: *mut PraedaGeneratorHandle,
+    number_of_items: c_uint,
+    base_level: f64,
+    level_variance: f64,
+    affix_chance: f64,
+    linear: u8,
+    scaling_factor: f64,
+    seed: u64,
+    error_out: *mut *mut c_char,
+) -> *mut CItemArrayHandle {
+    if handle.is_null() {
+        if !error_out.is_null()
+            && let Ok(err) = CString::new("Invalid handle") {
+            unsafe {
+                *error_out = err.into_raw();
+            }
+        }
+        return std::ptr::null_mut();
+    }
+
+    let options = GeneratorOptions {
+        number_of_items,
+        base_level,
+        level_variance,
+        affix_chance,
+        linear: linear != 0,
+        scaling_factor,
+    };
+
+    let generator = unsafe { &mut (*handle).generator };
+    match generator.generate_loot_seeded(&options, &GeneratorOverrides::empty(), "ffi", seed) {
         Ok(items) => {
             let c_array = CItemArray::from_rust(&items);
             Box::into_raw(Box::new(CItemArrayHandle { array: c_array }))

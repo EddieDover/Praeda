@@ -76,8 +76,39 @@ class Program {
             }
             Console.WriteLine();
 
-            // Test 4: Generator Info
-            Console.WriteLine("--- Test 4: Generator Info ---");
+            // Test 4: Deterministic Loot Generation
+            Console.WriteLine("--- Test 4: Deterministic Loot Generation ---");
+
+            const ulong seed = 20260817UL;
+
+            Console.WriteLine("Generating 5 items twice from seed " + seed + "...");
+            var firstRun = gen.GenerateLootSeeded(options, seed);
+            var secondRun = gen.GenerateLootSeeded(options, seed);
+
+            bool identical = firstRun.Count == secondRun.Count;
+            for (int i = 0; identical && i < firstRun.Count; i++) {
+                identical =
+                    firstRun[i].Name == secondRun[i].Name &&
+                    firstRun[i].Quality == secondRun[i].Quality &&
+                    firstRun[i].Type == secondRun[i].Type &&
+                    firstRun[i].Subtype == secondRun[i].Subtype;
+            }
+
+            for (int i = 0; i < firstRun.Count; i++) {
+                Console.WriteLine($"  {i + 1}. [{firstRun[i].Quality}] {firstRun[i].Type} / {firstRun[i].Subtype} - {firstRun[i].Name}");
+            }
+
+            if (!identical) {
+                throw new InvalidOperationException("Seeded generation returned different items for the same seed");
+            }
+            Console.WriteLine("✓ Both runs produced identical items");
+
+            var otherSeed = gen.GenerateLootSeeded(options, seed + 1);
+            Console.WriteLine("✓ Seed " + (seed + 1) + " produced its own independent batch of " + otherSeed.Count + " items");
+            Console.WriteLine();
+
+            // Test 5: Generator Info
+            Console.WriteLine("--- Test 5: Generator Info ---");
             string info = gen.GetInfo();
             Console.WriteLine("Generator info retrieved (raw format): " + info.Substring(0, Math.Min(50, info.Length)) + "...");
             Console.WriteLine();

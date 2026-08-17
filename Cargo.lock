@@ -384,6 +384,7 @@ version = "0.2.1"
 dependencies = [
  "clap",
  "rand",
+ "rand_chacha",
  "serde",
  "serde_json",
  "thiserror",

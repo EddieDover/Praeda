@@ -162,8 +162,43 @@ names = ["plate_armor", "leather_armor"]
         }
         std::cout << std::endl;
 
-        // Test 6: Generator Info
-        std::cout << "--- Test 6: Generator Info ---" << std::endl;
+        // Test 6: Deterministic Loot Generation
+        std::cout << "--- Test 6: Deterministic Loot Generation ---" << std::endl;
+
+        const uint64_t seed = 20260817ULL;
+
+        std::cout << "Generating 5 items twice from seed " << seed << "..." << std::endl;
+        auto first_run = gen->generate_loot_seeded(options, seed);
+        auto second_run = gen->generate_loot_seeded(options, seed);
+
+        bool identical = first_run.size() == second_run.size();
+        for (size_t i = 0; identical && i < first_run.size(); ++i) {
+            identical = first_run[i].name == second_run[i].name
+                     && first_run[i].quality == second_run[i].quality
+                     && first_run[i].type == second_run[i].type
+                     && first_run[i].subtype == second_run[i].subtype;
+        }
+
+        for (size_t i = 0; i < first_run.size(); ++i) {
+            std::cout << "  " << (i+1) << ". [" << first_run[i].quality
+                      << "] " << first_run[i].type
+                      << " / " << first_run[i].subtype
+                      << " - " << first_run[i].name << std::endl;
+        }
+
+        if (!identical) {
+            std::cerr << "✗ Seeded generation returned different items for the same seed" << std::endl;
+            return 1;
+        }
+        std::cout << "✓ Both runs produced identical items" << std::endl;
+
+        auto other_seed = gen->generate_loot_seeded(options, seed + 1);
+        std::cout << "✓ Seed " << (seed + 1) << " produced its own independent batch of "
+                  << other_seed.size() << " items" << std::endl;
+        std::cout << std::endl;
+
+        // Test 7: Generator Info
+        std::cout << "--- Test 7: Generator Info ---" << std::endl;
         std::string version = gen->info();
         std::cout << "Library version: " << version << std::endl;
         std::cout << "✓ Generator info retrieved successfully" << std::endl;
